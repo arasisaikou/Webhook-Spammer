@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>荒らし共栄圏 Webhook</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #0f0f0f;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-family: system-ui, sans-serif;
+      color: #fee2e2;
+    }
+    .container {
+      width: 94%;
+      max-width: 580px;
+      padding: 28px;
+      background: linear-gradient(145deg, #1a0000, #0a0a0a);
+      border-radius: 20px;
+      border: 1px solid #7f1d1d;
+      box-shadow: 0 0 50px rgba(239,68,68,.4);
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 20px;
+      font-size: 28px;
+      background: linear-gradient(90deg, #fecaca, #ef4444, #991b1b);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    input, textarea {
+      width: 100%;
+      box-sizing: border-box;
+      margin-top: 12px;
+      padding: 14px;
+      border-radius: 12px;
+      background: #111;
+      color: #fee2e2;
+      border: 1px solid #7f1d1d;
+      outline: none;
+      font-size: 15px;
+    }
+    textarea { height: 140px; resize: vertical; }
+    .row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .row input { flex: 1; min-width: 120px; }
+    button {
+      width: 100%;
+      margin-top: 16px;
+      padding: 16px;
+      font-size: 17px;
+      font-weight: bold;
+      border-radius: 14px;
+      border: none;
+      cursor: pointer;
+      color: white;
+      transition: all 0.2s;
+    }
+    .send {
+      background: linear-gradient(135deg, #dc2626, #ef4444, #b91c1c);
+      box-shadow: 0 0 25px rgba(239,68,68,.7);
+    }
+    .send:hover { transform: translateY(-2px); }
+    .stop {
+      background: linear-gradient(135deg, #374151, #1f2937);
+      box-shadow: 0 0 20px rgba(75,85,99,.6);
+    }
+    .status {
+      margin-top: 14px;
+      text-align: center;
+      font-size: 14px;
+      color: #fca5a5;
+    }
+    .log {
+      margin-top: 12px;
+      font-size: 13px;
+      max-height: 140px;
+      overflow-y: auto;
+      background: #0d0d0d;
+      padding: 10px;
+      border-radius: 10px;
+      border: 1px solid #4b1c1c;
+      color: #fecaca;
+    }
+    .log .success { color: #86efac; }
+    .log .error   { color: #f87171; }
+    .log .warn    { color: #fbbf24; }
+  </style>
+</head>
+
+<body>
+<div class="container">
+  <h1>Webhook Sender (Enhanced)</h1>
+
+  <input id="url" placeholder="Webhook URL (複数: カンマ区切り)">
+  <input id="server" placeholder="サーバーID">
+  <input id="name" placeholder="Webhook名">
+
+  <textarea id="msg" maxlength="2000" placeholder="送信メッセージ (最大2000文字)"></textarea>
+
+  <div class="row">
+    <input id="interval" type="number" value="1200" min="800" placeholder="間隔(ms) ※推奨1200〜">
+    <input id="limit" type="number" placeholder="回数（空=無限）">
+  </div>
+
+  <button class="send" onclick="start()">実行開始</button>
+  <button class="stop" onclick="stop()">強制停止</button>
+
+  <div class="status" id="status">待機中...</div>
+  <div class="status">送信済み: <span id="count">0</span> / エラー: <span id="errorCount">0</span></div>
+  <div class="log" id="log"></div>
+</div>
+
+<script>
+let timer = null;
+let running = false;
+let count = 0;
+let errorCount = 0;
+let queue = [];
+
+const urlEl       = document.getElementById("url");
+const msgEl       = document.getElementById("msg");
+const nameEl      = document.getElementById("name");
+const intervalEl  = document.getElementById("interval");
+const limitEl     = document.getElementById("limit");
+const statusEl    = document.getElementById("status");
+const countEl     = document.getElementById("count");
+const errorEl     = document.getElementById("errorCount");
+const logEl       = document.getElementById("log");
+
+function log(text, type = 'info') {
+  const div = document.createElement('div');
+  div.className = type;
+  div.innerHTML = `[${new Date().toLocaleTimeString()}] ${text}`;
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function addToQueue(fn) {
+  queue.push(fn);
+  if (queue.length === 1) processQueue();
+}
+
+async function processQueue() {
+  if (queue.length === 0 || !running) return;
+  const fn = queue.shift();
+  await fn();
+  
+  setTimeout(processQueue, 400); 
+}
+
+async function sendOnce(webhookUrl) {
+  const msg = msgEl.value.trim();
+  if (!msg) return;
+
+  const payload = {
+    content: msg.length <= 2000 ? msg : null,
+    username: nameEl.value.trim() || "Webhook Sender",
+  };
+
+  try {
+    if (msg.startsWith('{') && msg.endsWith('}')) {
+      const parsed = JSON.parse(msg);
+      if (parsed.embeds || parsed.embed) {
+        payload.embeds = parsed.embeds || [parsed.embed];
+        payload.content = parsed.content || null;
+      }
+    }
+  } catch {}
+
+  try {
+    const res = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (res.ok) {
+      count++;
+      countEl.textContent = count;
+      log(`✔ 成功 (${count}) → ${webhookUrl.slice(-10)}...`, 'success');
+    } else {
+      const data = await res.json().catch(() => ({}));
+      errorCount++;
+      errorEl.textContent = errorCount;
+
+      if (res.status === 429) {
+        const retryAfter = data.retry_after || 5;
+        log(`⚠ レート制限 (429) → ${retryAfter}秒待機`, 'warn');
+        await new Promise(r => setTimeout(r, retryAfter * 1000 + 500));
+
+        addToQueue(() => sendOnce(webhookUrl));
+      } else if (res.status === 401 || res.status === 404) {
+        log(`✖ 無効Webhook or 削除済み (${res.status})`, 'error');
+        stop();
+      } else {
+        log(`✖ エラー (${res.status}) ${data.message || ''}`, 'error');
+      }
+    }
+
+    const remaining = res.headers.get('X-RateLimit-Remaining');
+    if (remaining && parseInt(remaining) < 3) {
+      log(`警告: 残りリクエスト ${remaining} / バケット`, 'warn');
+    }
+  } catch (err) {
+    log(`✖ 通信失敗: ${err.message}`, 'error');
+    errorCount++;
+    errorEl.textContent = errorCount;
+  }
+}
+
+function start() {
+  if (running) return;
+
+  const urls = urlEl.value.trim().split(',').map(u => u.trim()).filter(Boolean);
+  const interval = Math.max(800, parseInt(intervalEl.value) || 1200);
+  const limit = parseInt(limitEl.value) || Infinity;
+
+  if (urls.length === 0 || !msgEl.value.trim()) {
+    statusEl.textContent = "Webhook URL と メッセージ を入力してください";
+    return;
+  }
+
+  running = true;
+  count = 0; errorCount = 0;
+  countEl.textContent = "0";
+  errorEl.textContent = "0";
+  statusEl.textContent = `送信中... (${urls.length} webhook使用)`;
+  log("▶ 開始 | 間隔: " + interval + "ms | 上限: " + (limit === Infinity ? "無限" : limit));
+
+  let sent = 0;
+  timer = setInterval(() => {
+    if (count >= limit || !running) {
+      log("■ 上限 or 停止");
+      stop();
+      return;
+    }
+
+    urls.forEach(url => {
+      if (running) addToQueue(() => sendOnce(url));
+    });
+    sent++;
+  }, interval);
+
+  urls.forEach(url => addToQueue(() => sendOnce(url)));
+}
+
+function stop() {
+  if (!running) return;
+  clearInterval(timer);
+  running = false;
+  queue = [];
+  statusEl.textContent = "停止しました";
+  log("■ 強制停止");
+}
+</script>
+</body>
+</html>

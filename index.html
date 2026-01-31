@@ -107,12 +107,12 @@
   <textarea id="msg" maxlength="2000" placeholder="送信メッセージ (最大2000文字)"></textarea>
 
   <div class="row">
-    <input id="interval" type="number" value="1200" min="800" placeholder="間隔(ms) ※推奨1200〜">
+    <input id="interval" type="number" value="1200" min="800" placeholder="間隔(ms)">
     <input id="limit" type="number" placeholder="回数（空=無限）">
   </div>
 
-  <button class="send" onclick="start()">実行開始</button>
-  <button class="stop" onclick="stop()">強制停止</button>
+  <button class="send" onclick="start()">実行</button>
+  <button class="stop" onclick="stop()">停止</button>
 
   <div class="status" id="status">待機中...</div>
   <div class="status">送信済み: <span id="count">0</span> / エラー: <span id="errorCount">0</span></div>
